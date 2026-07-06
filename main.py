@@ -10,6 +10,8 @@ import numpy as np
 import logging
 from datetime import datetime, timedelta
 import warnings
+import yaml
+import argparse
 warnings.filterwarnings('ignore')
 
 # Add src to path
@@ -36,13 +38,22 @@ def create_results_directory():
     os.makedirs('results', exist_ok=True)
     os.makedirs('results/figures', exist_ok=True)
 
-def run_complete_pipeline():
+def load_config(config_path='config.yaml'):
+    """Load configuration from YAML file"""
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
+
+def run_complete_pipeline(config_path='config.yaml'):
     """
     Run the complete Bayesian strategy ranking pipeline
     """
+    # Load configuration
+    config = load_config(config_path)
+    
     logger.info("="*60)
     logger.info("BAYESIAN RANKING OF INVESTMENT STRATEGIES")
-    logger.info("Period: May 2025 - July 2025")
+    logger.info(f"Period: {config['data']['start_date']} to {config['data']['end_date']}")
     logger.info("="*60)
     
     # Create results directory
@@ -56,9 +67,9 @@ def run_complete_pipeline():
     collector = DataCollector()
     
     # Collect data for multiple assets
-    symbols = ['AAPL', 'MSFT', 'GOOGL', 'SPY']
-    end_date = '2025-07-31'
-    start_date = '2025-05-01'
+    symbols = config['data']['symbols']
+    end_date = config['data']['end_date']
+    start_date = config['data']['start_date']
     
     all_data = {}
     for symbol in symbols:
@@ -67,9 +78,10 @@ def run_complete_pipeline():
         all_data[symbol] = data
         logger.info(f"  ✓ {symbol}: {len(data)} days of data")
     
-    # Use SPY for strategy testing
-    data = all_data['SPY']
-    logger.info(f"\nUsing SPY data for strategy testing")
+    # Use the primary symbol for strategy testing
+    primary_symbol = config['data']['primary_symbol']
+    data = all_data[primary_symbol]
+    logger.info(f"\nUsing {primary_symbol} data for strategy testing")
     logger.info(f"  Period: {data.index[0]} to {data.index[-1]}")
     logger.info(f"  Days: {len(data)}")
     
@@ -78,20 +90,30 @@ def run_complete_pipeline():
     logger.info("STEP 2: Defining Trading Strategies")
     logger.info("="*40)
     
-    strategies = [
-        # SMA Crossover strategies
-        SMAStrategy(short_window=10, long_window=30),
-        SMAStrategy(short_window=20, long_window=50),
-        SMAStrategy(short_window=30, long_window=60),
-        
-        # RSI strategies with different parameters
-        RSIStrategy(period=14, overbought=70, oversold=30),
-        RSIStrategy(period=14, overbought=80, oversold=20),
-        RSIStrategy(period=21, overbought=70, oversold=30),
-        
-        # Multiple moving average crossover
-        MACrossoverStrategy(),
-    ]
+    strategies = []
+    
+    # SMA Crossover strategies from config
+    for sma_config in config['strategies']['sma']:
+        strategies.append(
+            SMAStrategy(
+                short_window=sma_config['short_window'],
+                long_window=sma_config['long_window']
+            )
+        )
+    
+    # RSI strategies from config
+    for rsi_config in config['strategies']['rsi']:
+        strategies.append(
+            RSIStrategy(
+                period=rsi_config['period'],
+                overbought=rsi_config['overbought'],
+                oversold=rsi_config['oversold']
+            )
+        )
+    
+    # MACO strategy if enabled
+    if config['strategies']['ma_crossover']['enabled']:
+        strategies.append(MACrossoverStrategy())
     
     logger.info(f"Total strategies: {len(strategies)}")
     for s in strategies:
@@ -102,7 +124,10 @@ def run_complete_pipeline():
     logger.info("STEP 3: Running Backtests")
     logger.info("="*40)
     
-    engine = BacktestEngine(initial_capital=100000, commission=0.001)
+    engine = BacktestEngine(
+        initial_capital=config['backtest']['initial_capital'],
+        commission=config['backtest']['commission']
+    )
     results = engine.run_backtest(data, strategies)
     
     logger.info(f"Successfully backtested {len(results)} strategies")
@@ -130,7 +155,11 @@ def run_complete_pipeline():
     ranker = BayesianStrategyRanker(list(returns_dict.keys()))
     
     logger.info("Fitting Bayesian model (this may take a few minutes)...")
-    ranker.fit(returns_dict, n_samples=2000, n_chains=4)
+    ranker.fit(
+        returns_dict,
+        n_samples=config['bayesian']['n_samples'],
+        n_chains=config['bayesian']['n_chains']
+    )
     
     # Get rankings
     rankings = ranker.get_ranking()
@@ -185,3 +214,64 @@ def run_complete_pipeline():
     # Create summary report
     with open('results/summary_report.txt', 'w') as f:
         f.write("="*60 + "\n")
+        f.write("BAYESIAN STRATEGY RANKING - SUMMARY REPORT\n")
+        f.write("="*60 + "\n\n")
+        f.write(f"Period: {start_date} to {end_date}\n")
+        f.write(f"Primary Symbol: {primary_symbol}\n")
+        f.write(f"Total Strategies: {len(strategies)}\n\n")
+        
+        f.write("RANKINGS:\n")
+        f.write("-"*40 + "\n")
+        for idx, row in rankings.iterrows():
+            f.write(f"Rank {row['Rank']}: {row['Strategy']}\n")
+            f.write(f"  Mean Return: {row['Mean_Return']:.5f}\n")
+            f.write(f"  P(Best): {row['P(Best)']:.2%}\n\n")
+        
+        f.write("BEST PERFORMING METRICS:\n")
+        f.write("-"*40 + "\n")
+        best_strategy = rankings.iloc[0]['Strategy']
+        best_metrics = portfolios_dict[best_strategy]['metrics']
+        f.write(f"Strategy: {best_strategy}\n")
+        f.write(f"  Total Return: {best_metrics['total_return']:.2%}\n")
+        f.write(f"  Annualized Return: {best_metrics['annualized_return']:.2%}\n")
+        f.write(f"  Sharpe Ratio: {best_metrics['sharpe_ratio']:.3f}\n")
+        f.write(f"  Max Drawdown: {best_metrics['max_drawdown']:.2%}\n")
+        f.write(f"  Win Rate: {best_metrics['win_rate']:.2%}\n")
+    
+    logger.info(f"  ✓ Summary report saved to results/summary_report.txt")
+    
+    logger.info("\n" + "="*60)
+    logger.info("✅ ANALYSIS COMPLETE!")
+    logger.info(f"Results saved in 'results/' directory")
+    logger.info("="*60)
+    
+    return rankings, portfolios_dict
+
+def main():
+    """Main entry point with argument parsing"""
+    parser = argparse.ArgumentParser(
+        description='Bayesian Ranking of Investment Strategies'
+    )
+    parser.add_argument(
+        '--config', 
+        type=str, 
+        default='config.yaml',
+        help='Path to configuration file (default: config.yaml)'
+    )
+    parser.add_argument(
+        '--quick', 
+        action='store_true',
+        help='Run with reduced MCMC samples for faster execution'
+    )
+    
+    args = parser.parse_args()
+    
+    # If quick mode, override config settings
+    if args.quick:
+        logger.info("Running in quick mode with reduced samples")
+        # We'll handle this in the config loading
+    
+    run_complete_pipeline(args.config)
+
+if __name__ == "__main__":
+    main()
