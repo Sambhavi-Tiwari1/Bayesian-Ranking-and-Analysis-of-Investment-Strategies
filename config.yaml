@@ -1,1 +1,70 @@
+# Bayesian Trading Strategy Ranking - Configuration File
 
+# Data Settings
+data:
+  start_date: "2025-05-01"
+  end_date: "2025-07-31"
+  primary_symbol: "SPY"  # Main symbol for strategy testing
+  symbols:
+    - "SPY"
+    - "AAPL"
+    - "MSFT"
+    - "GOOGL"
+    - "QQQ"
+
+# Strategy Definitions
+strategies:
+  # SMA Crossover Strategies
+  sma:
+    - short_window: 10
+      long_window: 30
+    - short_window: 20
+      long_window: 50
+    - short_window: 30
+      long_window: 60
+    - short_window: 50
+      long_window: 100
+    - short_window: 20
+      long_window: 100
+  
+  # RSI Strategies
+  rsi:
+    - period: 14
+      overbought: 70
+      oversold: 30
+    - period: 14
+      overbought: 80
+      oversold: 20
+    - period: 21
+      overbought: 70
+      oversold: 30
+    - period: 9
+      overbought: 70
+      oversold: 30
+  
+  # Moving Average Crossover
+  ma_crossover:
+    enabled: true
+
+# Backtest Settings
+backtest:
+  initial_capital: 100000
+  commission: 0.001  # 0.1% per trade
+
+# Bayesian Model Settings
+bayesian:
+  n_samples: 2000    # MCMC samples per chain
+  n_chains: 4        # Number of MCMC chains
+  tune: 1000         # Tuning steps
+
+# Visualization Settings
+visualization:
+  figsize: [15, 10]
+  dpi: 300
+  style: "seaborn-v0_8-darkgrid"
+
+# Output Settings
+output:
+  save_plots: true
+  save_csv: true
+  save_logs: true
